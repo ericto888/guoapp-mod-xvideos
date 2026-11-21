@@ -18,24 +18,24 @@ const HEADERS = {
 };
 
 const CATEGORIES = [
-  { id: 'Amateur-65', name: 'Amateur' },
-  { id: 'Asian_Woman-32', name: 'Asian' },
-  { id: 'Anal-12', name: 'Anal' },
-  { id: 'Big_Tits-23', name: 'Big Tits' },
-  { id: 'Blowjob-15', name: 'Blowjob' },
-  { id: 'Creampie-40', name: 'Creampie' },
-  { id: 'Lesbian-26', name: 'Lesbian' },
-  { id: 'Milf-19', name: 'Milf' },
-  { id: 'Teen-13', name: 'Teen' },
-  { id: 'Ass-14', name: 'Ass' },
-  { id: 'bbw-51', name: 'BBW' },
-  { id: 'Latina-16', name: 'Latina' },
-  { id: 'Mature-38', name: 'Mature' },
-  { id: 'Stockings-28', name: 'Stockings' },
-  { id: 'Squinting-56', name: 'Squirt' },
-  { id: 'Solo_and_Masturbation-33', name: 'Solo' },
-  { id: 'Lingerie-83', name: 'Lingerie' },
-  { id: 'Cuckold-237', name: 'Cuckold' }
+  { id: 'Amateur-65', name: '业余' },
+  { id: 'Asian_Woman-32', name: '亚洲女性' },
+  { id: 'Anal-12', name: '肛交' },
+  { id: 'Big_Tits-23', name: '大胸' },
+  { id: 'Blowjob-15', name: '口交' },
+  { id: 'Creampie-40', name: '内射' },
+  { id: 'Lesbian-26', name: '女同性恋' },
+  { id: 'Milf-19', name: '熟女' },
+  { id: 'Teen-13', name: '年轻成人' },
+  { id: 'Ass-14', name: '臀部' },
+  { id: 'bbw-51', name: '丰满女性' },
+  { id: 'Latina-16', name: '拉丁裔' },
+  { id: 'Mature-38', name: '成熟女性' },
+  { id: 'Stockings-28', name: '长筒袜' },
+  { id: 'Squinting-56', name: '潮吹' },
+  { id: 'Solo_and_Masturbation-33', name: '单人／自慰' },
+  { id: 'Lingerie-83', name: '情趣内衣' },
+  { id: 'Cuckold-237', name: 'NTR' }
 ];
 
 function clean(s) {

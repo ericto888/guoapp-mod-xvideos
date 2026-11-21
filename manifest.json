@@ -1,8 +1,8 @@
 {
   "id": "xvideos",
   "name": "XVideos",
-  "version": "1.0.9",
-  "description": "XVideos 视频站源，扩展旧式 flv_url、通用 setVideo 函数及播放器配置解析，并增强字段诊断。",
+  "version": "1.0.10",
+  "description": "XVideos 视频站源，分类名称中文化，并扩展播放器配置解析与字段诊断。",
   "runtime": "js",
   "api": 1,
   "adult": true,
