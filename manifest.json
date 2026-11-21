@@ -1,0 +1,17 @@
+{
+  "id": "xvideos",
+  "name": "XVideos",
+  "version": "1.0.0",
+  "description": "XVideos 视频站源，支持分类、最新目录、搜索、详情与播放解析。",
+  "runtime": "js",
+  "api": 1,
+  "adult": true,
+  "hosts": [
+    "xvideos.com",
+    "*.xvideos.com"
+  ],
+  "capabilities": [
+    "search"
+  ],
+  "baseUrl": "https://www.xvideos.com"
+}
