@@ -1,7 +1,7 @@
 {
   "id": "xvideos",
   "name": "XVideos",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "XVideos 视频站源，支持分类、最新目录、搜索、详情与播放解析。",
   "runtime": "js",
   "api": 1,

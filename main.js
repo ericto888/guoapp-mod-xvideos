@@ -7,25 +7,25 @@ const responseLimit = 12 * 1024 * 1024;
 const requestTimeoutMs = 20000;
 
 const patterns = {
-  card: /<div id="video_([a-z0-9]+)"/gi,
-  numericId: /data-id="(\d+)"/i,
-  cardTitle: /<p class="title">([\s\S]*?)<\/p>/i,
-  attrTitle: /title="([^"]*)"/i,
-  cover: /data-src="([^"]+)"/i,
-  duration: /<span class="duration">([^<]*)<\/span>/i,
-  hd: /<span class="video-hd-mark">([^<]*)<\/span>/i,
-  pageTitle: /<h2 class="page-title">([\s\S]*?)<\/h2>/i,
-  ogTitle: /property="og:title"\s+content="([^"]*)"/i,
-  ogImage: /property="og:image"\s+content="([^"]*)"/i,
-  ogDescription: /property="og:description"\s+content="([^"]*)"/i,
-  hls: /html5player\.setVideoHLS\(\s*'([^']+)'/i,
-  high: /html5player\.setVideoUrlHigh\(\s*'([^']+)'/i,
-  low: /html5player\.setVideoUrlLow\(\s*'([^']+)'/i,
+  card: /<div\b[^>]*\bid=["']video_([a-z0-9]+)["'][^>]*>/gi,
+  numericId: /data-id=["'](\d+)["']/i,
+  cardTitle: /<p\b[^>]*class=["'][^"']*\btitle\b[^"']*["'][^>]*>([\s\S]*?)<\/p>/i,
+  attrTitle: /title=["']([^"']*)["']/i,
+  cover: /(?:data-src|data-original|data-lazy-src|data-thumb|src)=["']([^"']+)["']/i,
+  duration: /<span\b[^>]*class=["'][^"']*\bduration\b[^"']*["'][^>]*>([^<]*)<\/span>/i,
+  hd: /<span\b[^>]*class=["'][^"']*\bvideo-hd-mark\b[^"']*["'][^>]*>([^<]*)<\/span>/i,
+  pageTitle: /<h2\b[^>]*class=["'][^"']*\bpage-title\b[^"']*["'][^>]*>([\s\S]*?)<\/h2>/i,
+  ogTitle: /<meta\b(?=[^>]*property=["']og:title["'])(?=[^>]*content=["']([^"']*)["'])[^>]*>/i,
+  ogImage: /<meta\b(?=[^>]*property=["']og:image["'])(?=[^>]*content=["']([^"']*)["'])[^>]*>/i,
+  ogDescription: /<meta\b(?=[^>]*property=["']og:description["'])(?=[^>]*content=["']([^"']*)["'])[^>]*>/i,
+  hls: /html5player\.setVideoHLS\(\s*["']([^"']+)["']/i,
+  high: /html5player\.setVideoUrlHigh\(\s*["']([^"']+)["']/i,
+  low: /html5player\.setVideoUrlLow\(\s*["']([^"']+)["']/i,
   jsonName: /"name":\s*"([^"]*)"/i,
   jsonDescription: /"description":\s*"([^"]*)"/i,
   jsonDuration: /"duration":\s*"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?"/i,
-  category: /<a[^>]+href="\/c\/([A-Za-z0-9_.%\-]+-\d{1,6})"[^>]*>([\s\S]*?)<\/a>/gi,
-  tag: /<a[^>]*class="btn btn-default label[^"]*"[^>]*>([\s\S]*?)<\/a>/gi,
+  category: /<a\b[^>]*href=["']\/c\/([A-Za-z0-9_.%\-]+-\d{1,6})["'][^>]*>([\s\S]*?)<\/a>/gi,
+  tag: /<a\b[^>]*class=["'][^"']*\blabel\b[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi,
   categoryPage: /\/c\/[A-Za-z0-9_.%\-]+-\d{1,6}\/(\d+)/gi,
   newPage: /\/new\/(\d+)/gi,
   searchPage: /[?&]p=(\d+)/gi,
@@ -123,13 +123,47 @@ function requestText(path) {
   return body;
 }
 
+
+function readAttributes(tag) {
+  const attrs = {};
+  const pattern = /([a-zA-Z_:][a-zA-Z0-9_:.-]*)\s*=\s*(["'])(.*?)\2/g;
+  let match;
+  while ((match = pattern.exec(tag)) !== null) {
+    attrs[match[1].toLowerCase()] = match[3];
+  }
+  return attrs;
+}
+
+function metaContent(body, property) {
+  const metas = body.match(/<meta\b[^>]*>/gi) || [];
+  for (const tag of metas) {
+    const attrs = readAttributes(tag);
+    if (String(attrs.property || "").toLowerCase() === property.toLowerCase() && attrs.content) {
+      return htmlUnescape(attrs.content);
+    }
+  }
+  return "";
+}
+
+function cardCover(chunk) {
+  const imageTags = chunk.match(/<img\b[^>]*>/gi) || [];
+  for (const tag of imageTags) {
+    const attrs = readAttributes(tag);
+    for (const name of ["data-src", "data-original", "data-lazy-src", "data-thumb", "src"]) {
+      const url = fixUrl(attrs[name]);
+      if (url && !/blank\.gif|spacer|loading/i.test(url)) return url;
+    }
+  }
+  return "";
+}
+
 function parseCards(body) {
   const found = matches(patterns.card, body);
   const items = [];
   const seen = {};
   for (let index = 0; index < found.length; index++) {
     const eid = found[index][1];
-    const start = found[index].index + found[index][0].length;
+    const start = found[index].index;
     const end = index + 1 < found.length ? found[index + 1].index : body.length;
     const chunk = body.slice(start, end);
     const idMatch = patterns.numericId.exec(chunk);
@@ -144,14 +178,14 @@ function parseCards(body) {
     if (title === "") continue;
 
     seen[sourceId] = true;
-    const coverMatch = patterns.cover.exec(chunk);
+    const cover = cardCover(chunk);
     const durationMatch = patterns.duration.exec(chunk);
     const hdMatch = patterns.hd.exec(chunk);
     let remark = durationMatch ? clean(durationMatch[1]) : "";
     if (hdMatch && clean(hdMatch[1])) {
       remark = (remark + " " + clean(hdMatch[1])).trim();
     }
-    const cover = coverMatch ? fixUrl(coverMatch[1]) : "";
+    
     const drama = {
       id: host.dramaId(sourceId),
       source: host.source,
@@ -235,6 +269,11 @@ function pageTitle(body) {
       if (title) return title;
     }
   }
+  const documentTitle = /<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(body);
+  if (documentTitle) {
+    const title = clean(documentTitle[1].replace(/\s*[-|–]\s*XVideos.*$/i, ""));
+    if (title) return title;
+  }
   return "";
 }
 
@@ -287,7 +326,7 @@ function detail(sourceId) {
   const title = pageTitle(body);
   if (!title) throw new Error("XVideos 详情缺少视频名称");
 
-  const image = patterns.ogImage.exec(body);
+  const image = metaContent(body, "og:image");
   const descriptionMatches = [patterns.ogDescription, patterns.jsonDescription];
   let description = "";
   for (const regex of descriptionMatches) {
@@ -298,7 +337,7 @@ function detail(sourceId) {
       description = "";
     }
   }
-  const cover = image ? fixUrl(image[1]) : "";
+  const cover = fixUrl(image);
   const drama = {
     id: host.dramaId(id),
     source: host.source,
