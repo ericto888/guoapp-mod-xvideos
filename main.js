@@ -113,10 +113,11 @@ function toDrama(item) {
   };
 }
 
-function pageUrlOf(sourceId) {
+function pageUrlOf(sourceId, playerPath) {
   const parts = String(sourceId || '').split('~');
   if (parts.length < 2) throw new Error('缺少视频标识');
-  return SITE + '/video.' + parts[0] + '/' + parts[1] + '/0/';
+  const base = SITE + '/video.' + parts[0] + '/' + parts[1];
+  return playerPath ? base + '/0/' : base;
 }
 
 function mediaAddress(raw) {
@@ -180,7 +181,8 @@ module.exports = {
   },
 
   detail(sourceId) {
-    const pageUrl = pageUrlOf(sourceId);
+    // 详情页使用站点标准视频 URL，不附加播放器路径 /0/。
+    const pageUrl = pageUrlOf(sourceId, false);
     const html = get(pageUrl.replace(SITE, ''));
 
     const t = html.match(/<title[^>]*>([\s\S]*?)<\/title>/);
@@ -229,9 +231,23 @@ module.exports = {
     }
     if (!sid) throw new Error('无法确定视频标识');
 
-    const pageUrl = pageUrlOf(sid);
-    const html = get(pageUrl.replace(SITE, ''), pageUrl);
-    const media = extractMedia(html);
+    // 先请求标准详情 URL；仅在未解析到媒体地址时再尝试播放器路径 /0/。
+    const pageUrl = pageUrlOf(sid, false);
+    let html = get(pageUrl.replace(SITE, ''), pageUrl);
+    let media = extractMedia(html);
+    if (!media) {
+      const playerUrl = pageUrlOf(sid, true);
+      try {
+        const playerHtml = get(playerUrl.replace(SITE, ''), pageUrl);
+        const playerMedia = extractMedia(playerHtml);
+        if (playerMedia) {
+          html = playerHtml;
+          media = playerMedia;
+        }
+      } catch (e) {
+        // 保留标准页面的诊断信息；播放器路径可能不适用于所有视频。
+      }
+    }
     if (!media) {
       const blocked = /captcha|cloudflare|验证您是人类|访问过于频繁/i.test(html);
       throw new Error('XVideos 播放页未解析到 HLS/MP4 地址' +
