@@ -332,22 +332,44 @@ function detail(sourceId) {
 }
 
 function resolveMedia(task) {
-  const chapter = task && task.chapter ? task.chapter : {};
-  const sourceId = value(task && task.dramaId).split(":").pop();
-  if (!validSourceId(sourceId)) {
-    throw new Error("XVideos 播放分集信息无效，请刷新详情");
+  if (!task || !task.dramaId || !task.chapter || typeof task.chapter !== "object") {
+    throw new Error("XVideos 播放任务信息无效");
   }
-  let address = value(chapter.videoUrl);
-  const pageUrl = value(chapter.pageUrl);
-  if (!/^https?:\/\//i.test(address)) {
-    const parts = sourceId.split("-");
-    const body = requestText("/video." + parts[0] + "/" + parts[1] + "/0/");
+
+  // host.dramaId(sourceId) is the authoritative ID format used by the host.
+  // Do not infer chapter ID delimiters from host.chapterId(sourceId, "").
+  const dramaId = value(task.dramaId);
+  const sourceId = dramaId.indexOf(":") >= 0
+    ? dramaId.slice(dramaId.lastIndexOf(":") + 1)
+    : dramaId;
+  if (!validSourceId(sourceId)) {
+    throw new Error("XVideos 视频信息无效，请重新打开详情");
+  }
+
+  const chapter = task.chapter;
+  const chapterSource = value(chapter.source);
+  if (chapterSource && chapterSource !== host.source) {
+    throw new Error("XVideos 分集来源不匹配，请刷新详情");
+  }
+
+  // Detail returns a direct media URL. Reuse it first, as native Go provider does.
+  let address = fixUrl(chapter.videoUrl);
+  const parts = sourceId.split("-");
+  const pageUrl = value(chapter.pageUrl) || siteBaseUrl + "/video." + parts[0] + "/" + parts[1] + "/0/";
+
+  // Older saved chapters may not contain videoUrl; refresh the original detail page.
+  if (!address) {
+    const body = requestText(pageUrl);
     address = mediaUrl(body);
   }
-  if (!address) throw new Error("XVideos 该视频暂无可用播放地址");
+  if (!address) {
+    throw new Error("XVideos 该视频暂无可用播放地址");
+  }
+
+  const referer = value(chapter.referer) || siteBaseUrl + "/";
   return host.finishMedia({
     url: address,
-    referer: pageUrl || siteBaseUrl + "/",
+    referer: referer,
   });
 }
 
