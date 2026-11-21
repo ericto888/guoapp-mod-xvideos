@@ -88,7 +88,10 @@ function pageDiagnostics(response) {
     low: /setVideoUrlLow/i.test(html),
     m3u8: /m3u8/i.test(html),
     videoConfig: /video_url|videoUrl|hls_url|hlsUrl|sources|contentUrl/i.test(html),
-    playerScript: /html5player[^<]{0,120}\\.js|player[^<]{0,120}\\.js/i.test(html),
+    playerScript: /html5player[^<]{0,120}\.js|player[^<]{0,120}\.js/i.test(html),
+    flv: /(?:^|[?&])flv_url=/i.test(html) || /flv_url\s*[:=]/i.test(html),
+    setVideoFunctions: (html.match(/setVideo[A-Za-z0-9_]*/gi) || []).filter(function (v, i, a) { return a.indexOf(v) === i; }).slice(0, 12),
+    configKeys: (html.match(/(?:flv_url|video_url|videoUrl|hls_url|hlsUrl|sources|contentUrl|urlHigh|urlLow|video_hls)\s*:/gi) || []).map(function (v) { return v.replace(/\s*:.*/, '').toLowerCase(); }).filter(function (v, i, a) { return a.indexOf(v) === i; }).slice(0, 16),
     cloudflare: /cloudflare|cf-challenge|captcha|验证您是人类|访问过于频繁/i.test(html)
   };
 }
@@ -106,6 +109,9 @@ function formatDiagnostics(label, info) {
     ', m3u8文本=' + (info.m3u8 ? '是' : '否') +
     ', 视频配置标记=' + (info.videoConfig ? '是' : '否') +
     ', 播放器脚本=' + (info.playerScript ? '是' : '否') +
+    ', flv_url=' + (info.flv ? '发现' : '未发现') +
+    ', setVideo函数=' + (info.setVideoFunctions && info.setVideoFunctions.length ? info.setVideoFunctions.join('/') : '无') +
+    ', 配置字段=' + (info.configKeys && info.configKeys.length ? info.configKeys.join('/') : '无') +
     ', 验证页=' + (info.cloudflare ? '疑似' : '未发现');
 }
 
@@ -173,29 +179,50 @@ function mediaAddress(raw) {
 }
 
 function extractMedia(html) {
-  const patterns = [
-    /html5player\s*\.\s*setVideoHLS\s*\(\s*(['"])([\s\S]*?)\1\s*\)/i,
-    /html5player\s*\.\s*setVideoUrlHigh\s*\(\s*(['"])([\s\S]*?)\1\s*\)/i,
-    /html5player\s*\.\s*setVideoUrlLow\s*\(\s*(['"])([\s\S]*?)\1\s*\)/i
+  const source = String(html || '');
+
+  // Legacy XVideos query parameter, commonly URL-encoded.
+  const flvMatch = /(?:^|[?&])flv_url=([^&"'\s<>]+)/i.exec(source) ||
+    /flv_url\s*[:=]\s*(['"])([\s\S]*?)\1/i.exec(source);
+  if (flvMatch) {
+    let rawFlv = flvMatch[2] || flvMatch[1] || '';
+    try { rawFlv = decodeURIComponent(rawFlv.replace(/\+/g, '%20')); } catch (_) {}
+    const flvAddress = mediaAddress(rawFlv);
+    if (flvAddress) return { url: flvAddress, type: 'direct' };
+  }
+
+  // Match setVideo* calls even when the html5player prefix is absent.
+  const functionRe = /setVideo([A-Za-z0-9_]+)\s*\(\s*(['"])([\s\S]*?)\2\s*\)/ig;
+  let functionMatch;
+  const functionCandidates = [];
+  while ((functionMatch = functionRe.exec(source)) !== null) {
+    const kind = String(functionMatch[1] || '').toLowerCase();
+    const address = mediaAddress(functionMatch[3]);
+    if (!address) continue;
+    if (kind === 'hls') return { url: address, type: 'hls' };
+    if (kind.indexOf('url') === 0) functionCandidates.push({ url: address, type: 'direct' });
+  }
+  if (functionCandidates.length) return functionCandidates[0];
+
+  // Known player configuration fields.
+  const keyPatterns = [
+    { re: /["']?(?:hls|video_hls|hls_url|hlsUrl)["']?\s*:\s*["']([^"']+)["']/ig, type: 'hls' },
+    { re: /["']?(?:flv_url|video_url|videoUrl|urlHigh|urlLow|contentUrl)["']?\s*:\s*["']([^"']+)["']/ig, type: 'direct' }
   ];
-  for (let i = 0; i < patterns.length; i++) {
-    const match = patterns[i].exec(html);
-    if (match && match[2]) {
-      const address = mediaAddress(match[2]);
-      if (address) return { url: address, type: i === 0 ? 'hls' : 'direct' };
+  for (let i = 0; i < keyPatterns.length; i++) {
+    let match;
+    while ((match = keyPatterns[i].re.exec(source)) !== null) {
+      const address = mediaAddress(match[1]);
+      if (address) return { url: address, type: keyPatterns[i].type };
     }
   }
 
-  const rawPatterns = [
-    /["'](?:hls|video_hls|hls_url)["']\s*:\s*["']([^"']+)["']/ig,
-    /(?:https?:)?\\?\/\\?\/[^"'\s<>]+\.m3u8[^"'\s<>]*/ig
-  ];
-  for (let i = 0; i < rawPatterns.length; i++) {
-    let match;
-    while ((match = rawPatterns[i].exec(html)) !== null) {
-      const address = mediaAddress(match[1] || match[0]);
-      if (address && /m3u8/i.test(address)) return { url: address, type: 'hls' };
-    }
+  // Last fallback for explicit media URLs in page source.
+  const rawUrlRe = /(?:https?:)?\/\/[^"'\s<>]+?\.(?:m3u8|mp4)(?:\?[^"'\s<>]*)?/ig;
+  let rawMatch;
+  while ((rawMatch = rawUrlRe.exec(source)) !== null) {
+    const address = mediaAddress(rawMatch[0]);
+    if (address) return { url: address, type: /\.m3u8(?:\?|$)/i.test(address) ? 'hls' : 'direct' };
   }
   return null;
 }
