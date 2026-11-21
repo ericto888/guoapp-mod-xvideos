@@ -116,7 +116,42 @@ function toDrama(item) {
 function pageUrlOf(sourceId) {
   const parts = String(sourceId || '').split('~');
   if (parts.length < 2) throw new Error('缺少视频标识');
-  return SITE + '/video.' + parts[0] + '/' + parts[1];
+  return SITE + '/video.' + parts[0] + '/' + parts[1] + '/0/';
+}
+
+function mediaAddress(raw) {
+  let value = decode(String(raw || '').trim()).replace(/\\\//g, '/').replace(/&amp;/gi, '&');
+  value = value.replace(/\\u0026/gi, '&');
+  if (value.indexOf('//') === 0) value = 'https:' + value;
+  return /^https?:\/\//i.test(value) ? value : '';
+}
+
+function extractMedia(html) {
+  const patterns = [
+    /html5player\s*\.\s*setVideoHLS\s*\(\s*(['"])([\s\S]*?)\1\s*\)/i,
+    /html5player\s*\.\s*setVideoUrlHigh\s*\(\s*(['"])([\s\S]*?)\1\s*\)/i,
+    /html5player\s*\.\s*setVideoUrlLow\s*\(\s*(['"])([\s\S]*?)\1\s*\)/i
+  ];
+  for (let i = 0; i < patterns.length; i++) {
+    const match = patterns[i].exec(html);
+    if (match && match[2]) {
+      const address = mediaAddress(match[2]);
+      if (address) return { url: address, type: i === 0 ? 'hls' : 'direct' };
+    }
+  }
+
+  const rawPatterns = [
+    /["'](?:hls|video_hls|hls_url)["']\s*:\s*["']([^"']+)["']/ig,
+    /(?:https?:)?\\?\/\\?\/[^"'\s<>]+\.m3u8[^"'\s<>]*/ig
+  ];
+  for (let i = 0; i < rawPatterns.length; i++) {
+    let match;
+    while ((match = rawPatterns[i].exec(html)) !== null) {
+      const address = mediaAddress(match[1] || match[0]);
+      if (address && /m3u8/i.test(address)) return { url: address, type: 'hls' };
+    }
+  }
+  return null;
 }
 
 module.exports = {
@@ -195,23 +230,17 @@ module.exports = {
     if (!sid) throw new Error('无法确定视频标识');
 
     const pageUrl = pageUrlOf(sid);
-    const html = get(pageUrl.replace(SITE, ''));
-    const m = html.match(/setVideoHLS\('([^']+)'\)/) || html.match(/setVideoHLS\("([^"]+)"\)/);
-    if (!m) {
-      const alt = html.match(/["'](https?:[^"']+\.m3u8[^"']*)["']/);
-      if (!alt) throw new Error('详情页没有 HLS 地址');
-      return {
-        url: decode(alt[1]).replace(/\\\//g, '/'),
-        referer: pageUrl,
-        quality: 720,
-        credentials: { referer: pageUrl, origin: SITE, userAgent: UA }
-      };
+    const html = get(pageUrl.replace(SITE, ''), pageUrl);
+    const media = extractMedia(html);
+    if (!media) {
+      const blocked = /captcha|cloudflare|验证您是人类|访问过于频繁/i.test(html);
+      throw new Error('XVideos 播放页未解析到 HLS/MP4 地址' +
+        (blocked ? '，页面可能触发站点验证' : '') +
+        '（响应长度 ' + html.length + '）');
     }
-    return {
-      url: decode(m[1]).replace(/\\\//g, '/'),
-      referer: pageUrl,
-      quality: 720,
-      credentials: { referer: pageUrl, origin: SITE, userAgent: UA }
-    };
+    return host.finishMedia({
+      url: media.url,
+      referer: pageUrl
+    });
   }
 };
