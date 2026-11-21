@@ -53,15 +53,52 @@ function decode(s) {
     .replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
 }
 
-function get(path, referer) {
+function fetchPage(path, referer) {
   const url = path.indexOf('http') === 0 ? path : SITE + path;
   const headers = {};
   for (const k in HEADERS) headers[k] = HEADERS[k];
   headers['Referer'] = referer || SITE + '/';
   const res = host.fetch({ method: 'GET', url: url, headers: headers });
+  return {
+    status: typeof res.status === 'number' ? res.status : 0,
+    body: res.body || '',
+    url: res.url || url
+  };
+}
+
+function get(path, referer) {
+  const res = fetchPage(path, referer);
   if (res.status === 403) throw new Error('xvideos 拦了请求（403）');
   if (res.status < 200 || res.status >= 400) throw new Error('xvideos 返回 HTTP ' + res.status);
-  return res.body || '';
+  return res.body;
+}
+
+function pageDiagnostics(response) {
+  const html = response && response.body ? response.body : '';
+  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  const title = titleMatch ? clean(titleMatch[1]).slice(0, 100) : '(无标题)';
+  return {
+    status: response ? response.status : 0,
+    length: html.length,
+    title: title,
+    player: /html5player/i.test(html),
+    hls: /html5player\s*\.\s*setVideoHLS\s*\(/i.test(html),
+    high: /html5player\s*\.\s*setVideoUrlHigh\s*\(/i.test(html),
+    low: /html5player\s*\.\s*setVideoUrlLow\s*\(/i.test(html),
+    cloudflare: /cloudflare|cf-challenge|captcha|验证您是人类|访问过于频繁/i.test(html)
+  };
+}
+
+function formatDiagnostics(label, info) {
+  if (!info) return label + ': 请求失败';
+  return label + ': HTTP ' + info.status +
+    ', 长度 ' + info.length +
+    ', 标题「' + info.title + '」' +
+    ', html5player=' + (info.player ? '是' : '否') +
+    ', HLS=' + (info.hls ? '是' : '否') +
+    ', HighMP4=' + (info.high ? '是' : '否') +
+    ', LowMP4=' + (info.low ? '是' : '否') +
+    ', 验证页=' + (info.cloudflare ? '疑似' : '未发现');
 }
 
 function parseCards(html) {
@@ -231,32 +268,43 @@ module.exports = {
     }
     if (!sid) throw new Error('无法确定视频标识');
 
-    // 先请求标准详情 URL；仅在未解析到媒体地址时再尝试播放器路径 /0/。
+    // 先请求标准详情 URL；未取得媒体地址时再尝试 /0/ 播放路径。
     const pageUrl = pageUrlOf(sid, false);
-    let html = get(pageUrl.replace(SITE, ''), pageUrl);
-    let media = extractMedia(html);
+    let standardResponse = null;
+    let playerResponse = null;
+    let media = null;
+    try {
+      standardResponse = fetchPage(pageUrl.replace(SITE, ''), pageUrl);
+      if (standardResponse.status >= 200 && standardResponse.status < 400) {
+        media = extractMedia(standardResponse.body);
+      }
+    } catch (e) {
+      standardResponse = null;
+    }
+
     if (!media) {
       const playerUrl = pageUrlOf(sid, true);
       try {
-        const playerHtml = get(playerUrl.replace(SITE, ''), pageUrl);
-        const playerMedia = extractMedia(playerHtml);
-        if (playerMedia) {
-          html = playerHtml;
-          media = playerMedia;
+        playerResponse = fetchPage(playerUrl.replace(SITE, ''), pageUrl);
+        if (playerResponse.status >= 200 && playerResponse.status < 400) {
+          media = extractMedia(playerResponse.body);
         }
       } catch (e) {
-        // 保留标准页面的诊断信息；播放器路径可能不适用于所有视频。
+        playerResponse = null;
       }
     }
+
     if (!media) {
-      const blocked = /captcha|cloudflare|验证您是人类|访问过于频繁/i.test(html);
-      throw new Error('XVideos 播放页未解析到 HLS/MP4 地址' +
-        (blocked ? '，页面可能触发站点验证' : '') +
-        '（响应长度 ' + html.length + '）');
+      const standardInfo = pageDiagnostics(standardResponse);
+      const playerInfo = pageDiagnostics(playerResponse);
+      throw new Error('XVideos 未解析到 HLS/MP4 地址。' +
+        formatDiagnostics('详情页', standardInfo) + '；' +
+        formatDiagnostics('播放页', playerInfo));
     }
+
     return host.finishMedia({
       url: media.url,
-      referer: pageUrl
+      referer: (playerResponse && playerResponse.url) || (standardResponse && standardResponse.url) || pageUrl
     });
   }
 };
