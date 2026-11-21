@@ -332,26 +332,22 @@ function detail(sourceId) {
 }
 
 function resolveMedia(task) {
-  if (!task || !task.dramaId || !task.chapter) {
-    throw new Error("XVideos 播放任务信息无效");
-  }
-  const dramaId = value(task.dramaId);
-  const sourceId = dramaId.indexOf(":") >= 0 ? dramaId.slice(dramaId.lastIndexOf(":") + 1) : dramaId;
-  if (!validSourceId(sourceId) || !String(task.chapter.id || "").startsWith(host.chapterId(sourceId, ""))) {
+  const chapter = task && task.chapter ? task.chapter : {};
+  const sourceId = value(task && task.dramaId).split(":").pop();
+  if (!validSourceId(sourceId)) {
     throw new Error("XVideos 播放分集信息无效，请刷新详情");
   }
-  let address = value(task.chapter.videoUrl);
+  let address = value(chapter.videoUrl);
+  const pageUrl = value(chapter.pageUrl);
   if (!/^https?:\/\//i.test(address)) {
     const parts = sourceId.split("-");
     const body = requestText("/video." + parts[0] + "/" + parts[1] + "/0/");
     address = mediaUrl(body);
   }
   if (!address) throw new Error("XVideos 该视频暂无可用播放地址");
-  const referer = value(task.chapter.referer) || siteBaseUrl + "/";
   return host.finishMedia({
     url: address,
-    referer: referer,
-    headers: { Referer: referer, "User-Agent": userAgent },
+    referer: pageUrl || siteBaseUrl + "/",
   });
 }
 
