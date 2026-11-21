@@ -9,7 +9,7 @@
 
 const SITE = 'https://www.xvideos.com';
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15';
 
 const HEADERS = {
   'User-Agent': UA,
@@ -81,10 +81,14 @@ function pageDiagnostics(response) {
     status: response ? response.status : 0,
     length: html.length,
     title: title,
+    url: response && response.url ? response.url : '(未知)',
     player: /html5player/i.test(html),
-    hls: /html5player\s*\.\s*setVideoHLS\s*\(/i.test(html),
-    high: /html5player\s*\.\s*setVideoUrlHigh\s*\(/i.test(html),
-    low: /html5player\s*\.\s*setVideoUrlLow\s*\(/i.test(html),
+    hls: /setVideoHLS/i.test(html),
+    high: /setVideoUrlHigh/i.test(html),
+    low: /setVideoUrlLow/i.test(html),
+    m3u8: /m3u8/i.test(html),
+    videoConfig: /video_url|videoUrl|hls_url|hlsUrl|sources|contentUrl/i.test(html),
+    playerScript: /html5player[^<]{0,120}\\.js|player[^<]{0,120}\\.js/i.test(html),
     cloudflare: /cloudflare|cf-challenge|captcha|验证您是人类|访问过于频繁/i.test(html)
   };
 }
@@ -94,10 +98,14 @@ function formatDiagnostics(label, info) {
   return label + ': HTTP ' + info.status +
     ', 长度 ' + info.length +
     ', 标题「' + info.title + '」' +
+    ', URL=' + info.url +
     ', html5player=' + (info.player ? '是' : '否') +
-    ', HLS=' + (info.hls ? '是' : '否') +
-    ', HighMP4=' + (info.high ? '是' : '否') +
-    ', LowMP4=' + (info.low ? '是' : '否') +
+    ', HLS函数=' + (info.hls ? '是' : '否') +
+    ', High函数=' + (info.high ? '是' : '否') +
+    ', Low函数=' + (info.low ? '是' : '否') +
+    ', m3u8文本=' + (info.m3u8 ? '是' : '否') +
+    ', 视频配置标记=' + (info.videoConfig ? '是' : '否') +
+    ', 播放器脚本=' + (info.playerScript ? '是' : '否') +
     ', 验证页=' + (info.cloudflare ? '疑似' : '未发现');
 }
 
@@ -268,43 +276,33 @@ module.exports = {
     }
     if (!sid) throw new Error('无法确定视频标识');
 
-    // 先请求标准详情 URL；未取得媒体地址时再尝试 /0/ 播放路径。
-    const pageUrl = pageUrlOf(sid, false);
-    let standardResponse = null;
-    let playerResponse = null;
+    // 与上游一致，优先使用详情阶段保存的原始页面 URL，不再拼接 /0/ 备用路径。
+    const chapterPage = task && task.chapter && task.chapter.pageUrl;
+    const pageUrl = (typeof chapterPage === 'string' && chapterPage.indexOf(SITE + '/') === 0)
+      ? chapterPage
+      : pageUrlOf(sid, false);
+    let response = null;
+    let fetchError = '';
     let media = null;
     try {
-      standardResponse = fetchPage(pageUrl.replace(SITE, ''), pageUrl);
-      if (standardResponse.status >= 200 && standardResponse.status < 400) {
-        media = extractMedia(standardResponse.body);
+      response = fetchPage(pageUrl, pageUrl);
+      if (response.status >= 200 && response.status < 400) {
+        media = extractMedia(response.body);
       }
     } catch (e) {
-      standardResponse = null;
+      fetchError = String(e && e.message ? e.message : e).replace(/[\\r\\n]+/g, ' ').slice(0, 180);
     }
 
     if (!media) {
-      const playerUrl = pageUrlOf(sid, true);
-      try {
-        playerResponse = fetchPage(playerUrl.replace(SITE, ''), pageUrl);
-        if (playerResponse.status >= 200 && playerResponse.status < 400) {
-          media = extractMedia(playerResponse.body);
-        }
-      } catch (e) {
-        playerResponse = null;
-      }
-    }
-
-    if (!media) {
-      const standardInfo = pageDiagnostics(standardResponse);
-      const playerInfo = pageDiagnostics(playerResponse);
+      const info = pageDiagnostics(response);
       throw new Error('XVideos 未解析到 HLS/MP4 地址。' +
-        formatDiagnostics('详情页', standardInfo) + '；' +
-        formatDiagnostics('播放页', playerInfo));
+        formatDiagnostics('视频页', info) +
+        (fetchError ? '；请求异常=' + fetchError : ''));
     }
 
     return host.finishMedia({
       url: media.url,
-      referer: (playerResponse && playerResponse.url) || (standardResponse && standardResponse.url) || pageUrl
+      referer: (response && response.url) || pageUrl
     });
   }
 };
